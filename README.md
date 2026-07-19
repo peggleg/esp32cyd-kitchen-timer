@@ -1,6 +1,7 @@
 # Kitchen Timer - ESPHome
 
 Kitchen timer on ESP32-2432S028 CYD (Cheap Yellow Display) with Home Assistant integration.
+<img width="450" height="300" alt="image" src="https://github.com/user-attachments/assets/7a46e985-5463-4099-8b2a-365622345b0e" />
 
 **Max duration:** 12 hours
 
