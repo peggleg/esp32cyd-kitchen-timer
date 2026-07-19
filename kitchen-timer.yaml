@@ -1,0 +1,882 @@
+esphome:
+  name: kitchen-timer
+  friendly_name: Kitchen Timer
+  on_boot:
+    priority: -100
+    then:
+      - script.execute: refresh_select
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+  level: DEBUG
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Kitchen-Timer-Fallback"
+    password: "12345678"
+
+ota:
+  - platform: esphome
+    password: !secret ota
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+
+spi:
+  - id: tft_bus
+    clk_pin: GPIO14
+    mosi_pin: GPIO13
+    miso_pin: GPIO12
+  - id: touch_bus
+    clk_pin: GPIO25
+    mosi_pin: GPIO32
+    miso_pin: GPIO39
+
+globals:
+  - id: sel_seconds
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: custom_from_running
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: remaining
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: total
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: paused
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: running
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: alarm_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: alarm_secs
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: kbuf
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: unit_idx
+    type: int
+    restore_value: no
+    initial_value: '1'
+
+font:
+  - file: "gfonts://Roboto@700"
+    id: f10
+    size: 10
+    bpp: 4
+  - file: "gfonts://Roboto@700"
+    id: f12
+    size: 12
+    bpp: 4
+  - file: "gfonts://Roboto@700"
+    id: f16
+    size: 16
+    bpp: 4
+  - file: "gfonts://Roboto@700"
+    id: f26
+    size: 26
+    bpp: 4
+  - file: "gfonts://Roboto@700"
+    id: f34
+    size: 34
+    bpp: 4
+    glyphs: "0123456789:"
+  - file: "gfonts://Roboto@700"
+    id: f38
+    size: 38
+    bpp: 4
+    glyphs: "0123456789:h"
+
+display:
+  - platform: ili9xxx
+    model: st7789v
+    spi_id: tft_bus
+    data_rate: 20MHz
+    cs_pin: GPIO15
+    dc_pin: GPIO2
+    reset_pin: GPIO4
+    id: my_display
+    invert_colors: false
+    auto_clear_enabled: false
+    update_interval: never
+
+touchscreen:
+  - platform: xpt2046
+    spi_id: touch_bus
+    id: my_touchscreen
+    cs_pin: GPIO33
+    interrupt_pin: GPIO36
+    calibration:
+      x_min: 428
+      x_max: 3538
+      y_min: 193
+      y_max: 3671
+    transform:
+      swap_xy: false
+      mirror_x: true
+      mirror_y: false
+
+output:
+  - platform: gpio
+    pin: GPIO26
+    id: buzzer_output
+  - platform: ledc
+    pin: GPIO21
+    id: backlight_pwm
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: "Backlight"
+    restore_mode: ALWAYS_ON
+
+lvgl:
+  displays:
+    - my_display
+  touchscreens:
+    - my_touchscreen
+  rotation: 270
+  buffer_size: 25%
+  bg_color: 0xF8F5EC
+  text_color: 0x23211C
+  border_width: 0
+  pad_all: 0
+
+  pages:
+    - id: page_select
+      widgets:
+        - label:
+            x: 10
+            y: 8
+            text: "KITCHEN TIMER"
+            text_font: f10
+            text_color: 0x57554F
+        - obj:
+            x: 268
+            y: 11
+            width: 6
+            height: 6
+            radius: 3
+            bg_color: 0x3AA85B
+            border_width: 0
+        - label:
+            x: 279
+            y: 8
+            text: "HA"
+            text_font: f10
+            text_color: 0x57554F
+
+        - label:
+            id: lbl_dial
+            x: 0
+            y: 51
+            width: 320
+            text: "00:00"
+            text_font: f38
+            text_align: CENTER
+        - label:
+            x: 0
+            y: 97
+            width: 320
+            text: "TAP TO CLEAR"
+            text_font: f12
+            text_color: 0x57554F
+            text_align: CENTER
+        - button:
+            x: 40
+            y: 40
+            width: 240
+            height: 90
+            radius: 10
+            bg_opa: TRANSP
+            border_width: 0
+            shadow_width: 0
+            on_press:
+              - lambda: 'id(sel_seconds) = 0;'
+              - script.execute: refresh_select
+
+        # preset row
+        - button:
+            id: p1
+            x: 10
+            y: 138
+            width: 53
+            height: 44
+            radius: 10
+            bg_color: 0xE0DED7
+            on_press:
+              - lambda: 'id(sel_seconds) = min(id(sel_seconds) + 60, 43200);'
+              - script.execute: refresh_select
+            widgets:
+              - label:
+                  id: p1t
+                  align: CENTER
+                  text: "+1m"
+                  text_font: f12
+                  text_color: 0x302E28
+        - button:
+            id: p2
+            x: 68
+            y: 138
+            width: 53
+            height: 44
+            radius: 10
+            bg_color: 0xE0DED7
+            on_press:
+              - lambda: 'id(sel_seconds) = min(id(sel_seconds) + 600, 43200);'
+              - script.execute: refresh_select
+            widgets:
+              - label:
+                  id: p2t
+                  align: CENTER
+                  text: "+10m"
+                  text_font: f12
+                  text_color: 0x302E28
+        - button:
+            id: p3
+            x: 126
+            y: 138
+            width: 53
+            height: 44
+            radius: 10
+            bg_color: 0xE0DED7
+            on_press:
+              - lambda: 'id(sel_seconds) = min(id(sel_seconds) + 1800, 43200);'
+              - script.execute: refresh_select
+            widgets:
+              - label:
+                  id: p3t
+                  align: CENTER
+                  text: "+30m"
+                  text_font: f12
+                  text_color: 0x302E28
+        - button:
+            id: p4
+            x: 184
+            y: 138
+            width: 53
+            height: 44
+            radius: 10
+            bg_color: 0xE0DED7
+            on_press:
+              - lambda: 'id(sel_seconds) = min(id(sel_seconds) + 3600, 43200);'
+              - script.execute: refresh_select
+            widgets:
+              - label:
+                  id: p4t
+                  align: CENTER
+                  text: "+1h"
+                  text_font: f12
+                  text_color: 0x302E28
+        - button:
+            id: p_custom
+            x: 242
+            y: 138
+            width: 68
+            height: 44
+            radius: 10
+            bg_color: 0x00ABA3
+            on_press:
+              - lambda: 'id(kbuf) = ""; id(unit_idx) = 1; id(custom_from_running) = false;'
+              - script.execute: refresh_custom
+              - lvgl.page.show: page_custom
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Custom"
+                  text_font: f12
+                  text_color: 0xFFFFFF
+
+        # start
+        - button:
+            x: 10
+            y: 188
+            width: 300
+            height: 44
+            radius: 10
+            bg_color: 0x23211C
+            on_press:
+              - lambda: |-
+                  if (id(sel_seconds) > 0) {
+                    id(total) = id(sel_seconds);
+                    id(remaining) = id(sel_seconds);
+                    id(running) = true;
+                    id(paused) = false;
+                  }
+              - if:
+                  condition:
+                    lambda: 'return id(running);'
+                  then:
+                    - script.execute: refresh_running
+                    - lvgl.page.show: page_running
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "START"
+                  text_font: f16
+                  text_color: 0xFFFFFF
+
+    - id: page_custom
+      widgets:
+        - button:
+            x: 0
+            y: 0
+            width: 72
+            height: 34
+            radius: 7
+            bg_color: 0xE0DED7
+            on_press:
+              - if:
+                  condition:
+                    lambda: 'return id(custom_from_running);'
+                  then:
+                    - lvgl.page.show: page_running
+                  else:
+                    - lvgl.page.show: page_select
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "BACK"
+                  text_font: f10
+                  text_color: 0x2B2923
+        - label:
+            id: lbl_custom_title
+            x: 82
+            y: 11
+            text: "CUSTOM TIME"
+            text_font: f10
+            text_color: 0x57554F
+
+        - label:
+            id: lbl_buf
+            x: 90
+            y: 36
+            width: 90
+            text: "0"
+            text_font: f34
+            text_align: RIGHT
+        - button:
+            id: btn_unit
+            x: 190
+            y: 42
+            width: 44
+            height: 22
+            radius: 11
+            bg_color: 0x00ABA3
+            on_press:
+              - lambda: 'id(unit_idx) = (id(unit_idx) + 1) % 3;'
+              - script.execute: refresh_custom
+            widgets:
+              - label:
+                  id: lbl_unit
+                  align: CENTER
+                  text: "MIN"
+                  text_font: f12
+                  text_color: 0xFFFFFF
+
+        - button:
+            x: 10
+            y: 74
+            width: 97
+            height: 36
+            radius: 8
+            bg_color: 0xE3E1DB
+            on_press:
+              - lambda: 'if (id(kbuf).size() < 3) id(kbuf) += "1";'
+              - script.execute: refresh_custom
+            widgets:
+              - label: { align: CENTER, text: "1", text_font: f16, text_color: 0x2B2923 }
+        - button:
+            x: 111
+            y: 74
+            width: 97
+            height: 36
+            radius: 8
+            bg_color: 0xE3E1DB
+            on_press:
+              - lambda: 'if (id(kbuf).size() < 3) id(kbuf) += "2";'
+              - script.execute: refresh_custom
+            widgets:
+              - label: { align: CENTER, text: "2", text_font: f16, text_color: 0x2B2923 }
+        - button:
+            x: 213
+            y: 74
+            width: 97
+            height: 36
+            radius: 8
+            bg_color: 0xE3E1DB
+            on_press:
+              - lambda: 'if (id(kbuf).size() < 3) id(kbuf) += "3";'
+              - script.execute: refresh_custom
+            widgets:
+              - label: { align: CENTER, text: "3", text_font: f16, text_color: 0x2B2923 }
+        - button:
+            x: 10
+            y: 115
+            width: 97
+            height: 36
+            radius: 8
+            bg_color: 0xE3E1DB
+            on_press:
+              - lambda: 'if (id(kbuf).size() < 3) id(kbuf) += "4";'
+              - script.execute: refresh_custom
+            widgets:
+              - label: { align: CENTER, text: "4", text_font: f16, text_color: 0x2B2923 }
+        - button:
+            x: 111
+            y: 115
+            width: 97
+            height: 36
+            radius: 8
+            bg_color: 0xE3E1DB
+            on_press:
+              - lambda: 'if (id(kbuf).size() < 3) id(kbuf) += "5";'
+              - script.execute: refresh_custom
+            widgets:
+              - label: { align: CENTER, text: "5", text_font: f16, text_color: 0x2B2923 }
+        - button:
+            x: 213
+            y: 115
+            width: 97
+            height: 36
+            radius: 8
+            bg_color: 0xE3E1DB
+            on_press:
+              - lambda: 'if (id(kbuf).size() < 3) id(kbuf) += "6";'
+              - script.execute: refresh_custom
+            widgets:
+              - label: { align: CENTER, text: "6", text_font: f16, text_color: 0x2B2923 }
+        - button:
+            x: 10
+            y: 155
+            width: 97
+            height: 36
+            radius: 8
+            bg_color: 0xE3E1DB
+            on_press:
+              - lambda: 'if (id(kbuf).size() < 3) id(kbuf) += "7";'
+              - script.execute: refresh_custom
+            widgets:
+              - label: { align: CENTER, text: "7", text_font: f16, text_color: 0x2B2923 }
+        - button:
+            x: 111
+            y: 155
+            width: 97
+            height: 36
+            radius: 8
+            bg_color: 0xE3E1DB
+            on_press:
+              - lambda: 'if (id(kbuf).size() < 3) id(kbuf) += "8";'
+              - script.execute: refresh_custom
+            widgets:
+              - label: { align: CENTER, text: "8", text_font: f16, text_color: 0x2B2923 }
+        - button:
+            x: 213
+            y: 155
+            width: 97
+            height: 36
+            radius: 8
+            bg_color: 0xE3E1DB
+            on_press:
+              - lambda: 'if (id(kbuf).size() < 3) id(kbuf) += "9";'
+              - script.execute: refresh_custom
+            widgets:
+              - label: { align: CENTER, text: "9", text_font: f16, text_color: 0x2B2923 }
+        - button:
+            x: 10
+            y: 196
+            width: 97
+            height: 36
+            radius: 8
+            bg_color: 0xE3E1DB
+            on_press:
+              - lambda: 'if (!id(kbuf).empty()) id(kbuf).erase(id(kbuf).size() - 1);'
+              - script.execute: refresh_custom
+            widgets:
+              - label: { align: CENTER, text: "DEL", text_font: f12, text_color: 0x2B2923 }
+        - button:
+            x: 111
+            y: 196
+            width: 97
+            height: 36
+            radius: 8
+            bg_color: 0xE3E1DB
+            on_press:
+              - lambda: 'if (id(kbuf).size() < 3) id(kbuf) += "0";'
+              - script.execute: refresh_custom
+            widgets:
+              - label: { align: CENTER, text: "0", text_font: f16, text_color: 0x2B2923 }
+        - button:
+            x: 213
+            y: 196
+            width: 97
+            height: 36
+            radius: 8
+            bg_color: 0x00ABA3
+            on_press:
+              - lambda: |-
+                  int n = id(kbuf).empty() ? 0 : atoi(id(kbuf).c_str());
+                  if (n > 0) {
+                    int mult = (id(unit_idx) == 0) ? 1 : (id(unit_idx) == 1) ? 60 : 3600;
+                    int secs = n * mult;
+                    if (secs > 43200) secs = 43200;
+                    if (id(custom_from_running)) {
+                      // add to the live countdown; bar rescales, does not restart
+                      id(remaining) += secs;
+                      id(total) += secs;
+                    } else {
+                      id(sel_seconds) = secs;
+                    }
+                  }
+              - if:
+                  condition:
+                    lambda: 'return id(custom_from_running);'
+                  then:
+                    - script.execute: refresh_running
+                    - lvgl.page.show: page_running
+                  else:
+                    - script.execute: refresh_select
+                    - lvgl.page.show: page_select
+            widgets:
+              - label: { align: CENTER, text: "OK", text_font: f16, text_color: 0xFFFFFF }
+
+    - id: page_running
+      widgets:
+        - label:
+            id: lbl_status
+            x: 10
+            y: 8
+            text: "RUNNING"
+            text_font: f10
+            text_color: 0x57554F
+        - obj:
+            x: 268
+            y: 11
+            width: 6
+            height: 6
+            radius: 3
+            bg_color: 0x3AA85B
+            border_width: 0
+        - label:
+            x: 279
+            y: 8
+            text: "HA"
+            text_font: f10
+            text_color: 0x57554F
+
+        - label:
+            id: lbl_count
+            x: 0
+            y: 79
+            width: 320
+            text: "00:00"
+            text_font: f38
+            text_align: CENTER
+        - bar:
+            id: prog
+            x: 20
+            y: 124
+            width: 280
+            height: 8
+            radius: 4
+            min_value: 0
+            max_value: 100
+            value: 100
+            bg_color: 0xE0DED7
+            indicator:
+              bg_color: 0xEF6856
+              radius: 4
+
+        - button:
+            x: 10
+            y: 190
+            width: 56
+            height: 46
+            radius: 9
+            bg_color: 0xE0DED7
+            on_press:
+              - lambda: 'id(paused) = !id(paused);'
+              - script.execute: refresh_running
+            widgets:
+              - label:
+                  id: lbl_pause
+                  align: CENTER
+                  text: "PAUSE"
+                  text_font: f10
+                  text_color: 0x2B2923
+        - button:
+            x: 71
+            y: 190
+            width: 56
+            height: 46
+            radius: 9
+            bg_color: 0x00ABA3
+            on_press:
+              - lambda: 'id(remaining) += 60; id(total) += 60;'
+              - script.execute: refresh_running
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "+1 MIN"
+                  text_font: f10
+                  text_color: 0xFFFFFF
+        - button:
+            x: 132
+            y: 190
+            width: 56
+            height: 46
+            radius: 9
+            bg_color: 0x00ABA3
+            on_press:
+              - lambda: 'id(remaining) += 300; id(total) += 300;'
+              - script.execute: refresh_running
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "+5 MIN"
+                  text_font: f10
+                  text_color: 0xFFFFFF
+        - button:
+            x: 193
+            y: 190
+            width: 56
+            height: 46
+            radius: 9
+            bg_color: 0xE0DED7
+            on_press:
+              - lambda: 'id(kbuf) = ""; id(unit_idx) = 1; id(custom_from_running) = true;'
+              - script.execute: refresh_custom
+              - lvgl.page.show: page_custom
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "+CUSTOM"
+                  text_font: f10
+                  text_color: 0x2B2923
+        - button:
+            x: 254
+            y: 190
+            width: 56
+            height: 46
+            radius: 9
+            bg_color: 0xEF6856
+            on_press:
+              - lambda: 'id(running) = false; id(paused) = false;'
+              - lvgl.page.show: page_select
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "CANCEL"
+                  text_font: f10
+                  text_color: 0xFFFFFF
+
+    - id: page_done
+      bg_color: 0xEF6856
+      widgets:
+        - button:
+            id: done_hit
+            x: 0
+            y: 0
+            width: 320
+            height: 240
+            bg_opa: TRANSP
+            border_width: 0
+            shadow_width: 0
+            on_press:
+              - lambda: 'id(alarm_active) = false;'
+              - output.turn_off: buzzer_output
+              - lvgl.page.show: page_select
+        - label:
+            id: lbl_done
+            x: 0
+            y: 100
+            width: 320
+            text: "TIME'S UP!"
+            text_font: f26
+            text_color: 0xFFFFFF
+            text_align: CENTER
+        - label:
+            x: 0
+            y: 136
+            width: 320
+            text: "TAP ANYWHERE TO DISMISS"
+            text_font: f10
+            text_color: 0x443734
+            text_align: CENTER
+
+script:
+  - id: refresh_select
+    then:
+      - lvgl.label.update:
+          id: lbl_dial
+          text: !lambda |-
+            int t = id(sel_seconds);
+            char b[12];
+            int h = t / 3600, m = (t % 3600) / 60, s = t % 60;
+            if (h > 0) snprintf(b, sizeof(b), "%dh%02d", h, m);
+            else snprintf(b, sizeof(b), "%02d:%02d", m, s);
+            return std::string(b);
+
+  - id: refresh_custom
+    then:
+      - lvgl.label.update:
+          id: lbl_custom_title
+          text: !lambda 'return id(custom_from_running) ? std::string("ADD TIME") : std::string("CUSTOM TIME");'
+      - lvgl.label.update:
+          id: lbl_buf
+          text: !lambda 'return id(kbuf).empty() ? std::string("0") : id(kbuf);'
+      - lvgl.label.update:
+          id: lbl_unit
+          text: !lambda |-
+            if (id(unit_idx) == 0) return std::string("SEC");
+            if (id(unit_idx) == 1) return std::string("MIN");
+            return std::string("HRS");
+
+  - id: refresh_running
+    then:
+      - lvgl.label.update:
+          id: lbl_count
+          text: !lambda |-
+            int t = id(remaining);
+            char b[12];
+            int h = t / 3600, m = (t % 3600) / 60, s = t % 60;
+            if (h > 0) snprintf(b, sizeof(b), "%d:%02d:%02d", h, m, s);
+            else snprintf(b, sizeof(b), "%02d:%02d", m, s);
+            return std::string(b);
+      - lvgl.bar.update:
+          id: prog
+          value: !lambda 'return id(total) > 0 ? (int)((id(remaining) * 100.0f) / id(total)) : 0;'
+      - lvgl.label.update:
+          id: lbl_status
+          text: !lambda 'return id(paused) ? std::string("PAUSED") : std::string("RUNNING");'
+      - lvgl.label.update:
+          id: lbl_pause
+          text: !lambda 'return id(paused) ? std::string("RESUME") : std::string("PAUSE");'
+
+interval:
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            lambda: 'return id(running) && !id(paused) && id(remaining) > 0;'
+          then:
+            - lambda: 'id(remaining) -= 1;'
+            - script.execute: refresh_running
+            - if:
+                condition:
+                  lambda: 'return id(remaining) <= 0;'
+                then:
+                  - lambda: 'id(running) = false; id(alarm_active) = true;'
+                  - output.turn_on: buzzer_output
+                  - lvgl.page.show: page_done
+                  - delay: 5s
+                  - output.turn_off: buzzer_output
+
+  - interval: 10s
+    then:
+      - if:
+          condition:
+            lambda: 'return id(alarm_active);'
+          then:
+            - lambda: 'id(alarm_secs) += 10; if (id(alarm_secs) >= 600) { id(alarm_active) = false; id(alarm_secs) = 0; }'
+          else:
+            - lambda: 'id(alarm_secs) = 0;'
+
+  - interval: 300ms
+    then:
+      - if:
+          condition:
+            lvgl.page.is_showing: page_done
+          then:
+            - lvgl.widget.update:
+                id: page_done
+                bg_color: !lambda 'return (millis() / 300) % 2 ? lv_color_hex(0xEF6856) : lv_color_hex(0xF8F5EC);'
+            - lvgl.label.update:
+                id: lbl_done
+                text_color: !lambda 'return (millis() / 300) % 2 ? lv_color_hex(0xFFFFFF) : lv_color_hex(0xEF6856);'
+
+sensor:
+  - platform: template
+    id: timer_remaining_sensor
+    name: "Timer Remaining"
+    unit_of_measurement: "s"
+    device_class: duration
+    icon: "mdi:timer"
+    lambda: 'return id(remaining);'
+    update_interval: 1s
+
+binary_sensor:
+  - platform: template
+    id: timer_alarm
+    name: "Timer Alarm"
+    lambda: 'return id(alarm_active);'
+
+  - platform: template
+    id: timer_running_sensor
+    name: "Timer Running"
+    device_class: running
+    lambda: 'return id(running) && !id(paused);'
+
+number:
+  - platform: template
+    id: timer_set_duration
+    name: "Timer Duration (seconds)"
+    min_value: 0
+    max_value: 43200
+    step: 1
+    unit_of_measurement: "s"
+    icon: "mdi:timer"
+    optimistic: true
+    set_action:
+      then:
+        - lambda: 'id(sel_seconds) = (int)x;'
+        - script.execute: refresh_select
+
+switch:
+  - platform: template
+    id: timer_running_switch
+    name: "Timer Control"
+    icon: "mdi:play-pause"
+    optimistic: true
+    turn_on_action:
+      then:
+        - lambda: |-
+            if (id(sel_seconds) > 0) {
+              id(total) = id(sel_seconds);
+              id(remaining) = id(sel_seconds);
+              id(running) = true;
+              id(paused) = false;
+            }
+        - script.execute: refresh_running
+        - lvgl.page.show: page_running
+    turn_off_action:
+      then:
+        - lambda: 'id(paused) = true;'
+        - script.execute: refresh_running
+    lambda: 'return id(running) && !id(paused);'
