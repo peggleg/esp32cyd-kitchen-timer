@@ -4,6 +4,9 @@ esphome:
   on_boot:
     priority: -100
     then:
+      - lambda: |-
+          gpio_hold_dis(GPIO_NUM_21);
+          gpio_deep_sleep_hold_dis();
       - script.execute: refresh_select
 
 esp32:
@@ -33,6 +36,7 @@ time:
   - platform: homeassistant
     id: homeassistant_time
 
+# SPI Configuration - CYD uses TWO separate buses
 spi:
   - id: tft_bus
     clk_pin: GPIO14
@@ -43,12 +47,21 @@ spi:
     mosi_pin: GPIO32
     miso_pin: GPIO39
 
+deep_sleep:
+  id: deep_sleep_1
+  wakeup_pin:
+    number: GPIO36
+    allow_other_uses: true
+    inverted: true      # XPT2046 IRQ pulls LOW on touch, wake on that level
+  wakeup_pin_mode: KEEP_AWAKE
+
+# ---------------------------------------------------------------- state
 globals:
-  - id: sel_seconds
+  - id: sel_seconds        # currently selected duration
     type: int
     restore_value: no
     initial_value: '0'
-  - id: custom_from_running
+  - id: custom_from_running   # true when keypad was opened mid-countdown
     type: bool
     restore_value: no
     initial_value: 'false'
@@ -68,23 +81,32 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
-  - id: alarm_active
+  - id: alarm_active       # true from timer finishing until the screen is tapped
     type: bool
     restore_value: no
     initial_value: 'false'
-  - id: alarm_secs
+  - id: alarm_secs         # how long the alarm has been unacknowledged
     type: int
     restore_value: no
     initial_value: '0'
-  - id: kbuf
+  - id: kbuf               # keypad digit buffer
     type: std::string
     restore_value: no
     initial_value: '""'
-  - id: unit_idx
+  - id: unit_idx           # 0=SEC 1=MIN 2=HRS
     type: int
     restore_value: no
     initial_value: '1'
+  - id: idle_secs
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: safe_to_sleep
+    type: bool
+    restore_value: no
+    initial_value: 'false'
 
+# ---------------------------------------------------------------- fonts
 font:
   - file: "gfonts://Roboto@700"
     id: f10
@@ -113,6 +135,7 @@ font:
     bpp: 4
     glyphs: "0123456789:h"
 
+# ---------------------------------------------------------------- display
 display:
   - platform: ili9xxx
     model: st7789v
@@ -126,12 +149,15 @@ display:
     auto_clear_enabled: false
     update_interval: never
 
+# ---------------------------------------------------------------- touch
 touchscreen:
   - platform: xpt2046
     spi_id: touch_bus
     id: my_touchscreen
     cs_pin: GPIO33
-    interrupt_pin: GPIO36
+    interrupt_pin:
+      number: GPIO36
+      allow_other_uses: true
     calibration:
       x_min: 428
       x_max: 3538
@@ -142,6 +168,7 @@ touchscreen:
       mirror_x: true
       mirror_y: false
 
+# ---------------------------------------------------------------- backlight
 output:
   - platform: gpio
     pin: GPIO26
@@ -155,7 +182,9 @@ light:
     output: backlight_pwm
     name: "Backlight"
     restore_mode: ALWAYS_ON
+    id: backlight_light
 
+# ---------------------------------------------------------------- UI
 lvgl:
   displays:
     - my_display
@@ -169,6 +198,7 @@ lvgl:
   pad_all: 0
 
   pages:
+    # ============================================ SELECT
     - id: page_select
       widgets:
         - label:
@@ -221,7 +251,6 @@ lvgl:
               - lambda: 'id(sel_seconds) = 0;'
               - script.execute: refresh_select
 
-        # preset row
         - button:
             id: p1
             x: 10
@@ -313,7 +342,6 @@ lvgl:
                   text_font: f12
                   text_color: 0xFFFFFF
 
-        # start
         - button:
             x: 10
             y: 188
@@ -342,6 +370,7 @@ lvgl:
                   text_font: f16
                   text_color: 0xFFFFFF
 
+    # ============================================ CUSTOM
     - id: page_custom
       widgets:
         - button:
@@ -547,7 +576,6 @@ lvgl:
                     int secs = n * mult;
                     if (secs > 43200) secs = 43200;
                     if (id(custom_from_running)) {
-                      // add to the live countdown; bar rescales, does not restart
                       id(remaining) += secs;
                       id(total) += secs;
                     } else {
@@ -566,6 +594,7 @@ lvgl:
             widgets:
               - label: { align: CENTER, text: "OK", text_font: f16, text_color: 0xFFFFFF }
 
+    # ============================================ RUNNING
     - id: page_running
       widgets:
         - label:
@@ -696,6 +725,7 @@ lvgl:
                   text_font: f10
                   text_color: 0xFFFFFF
 
+    # ============================================ DONE
     - id: page_done
       bg_color: 0xEF6856
       widgets:
@@ -730,6 +760,7 @@ lvgl:
             text_color: 0x443734
             text_align: CENTER
 
+# ---------------------------------------------------------------- scripts
 script:
   - id: refresh_select
     then:
@@ -779,7 +810,9 @@ script:
           id: lbl_pause
           text: !lambda 'return id(paused) ? std::string("RESUME") : std::string("PAUSE");'
 
+# ---------------------------------------------------------------- logic
 interval:
+  # countdown
   - interval: 1s
     then:
       - if:
@@ -797,7 +830,36 @@ interval:
                   - lvgl.page.show: page_done
                   - delay: 5s
                   - output.turn_off: buzzer_output
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            lambda: 'return !id(safe_to_sleep) && millis() > 90000;'
+          then:
+            - lambda: 'id(safe_to_sleep) = true;'
+  - interval: 10s
+    then:
+      - if:
+          condition:
+            lambda: 'return id(sel_seconds) == 0 && !id(running);'
+          then:
+            - lambda: 'id(idle_secs) += 10;'
+            - if:
+                condition:
+                  lambda: 'return id(idle_secs) >= 60 && id(safe_to_sleep);'
+                then:
+                  - light.turn_off: backlight_light
+                  - lambda: |-
+                      gpio_set_direction(GPIO_NUM_21, GPIO_MODE_OUTPUT);
+                      gpio_set_level(GPIO_NUM_21, 0);
+                      gpio_hold_en(GPIO_NUM_21);
+                      gpio_deep_sleep_hold_en();
+                  - delay: 200ms
+                  - deep_sleep.enter: deep_sleep_1
+          else:
+            - lambda: 'id(idle_secs) = 0;'
 
+  # safety: stop nagging after 10 minutes if nobody dismisses it
   - interval: 10s
     then:
       - if:
@@ -808,7 +870,8 @@ interval:
           else:
             - lambda: 'id(alarm_secs) = 0;'
 
-  - interval: 300ms
+  # TIME'S UP! flash
+  - interval: 1000ms
     then:
       - if:
           condition:
@@ -821,6 +884,7 @@ interval:
                 id: lbl_done
                 text_color: !lambda 'return (millis() / 300) % 2 ? lv_color_hex(0xFFFFFF) : lv_color_hex(0xEF6856);'
 
+# ---------------------------------------------------------------- HA
 sensor:
   - platform: template
     id: timer_remaining_sensor
