@@ -1,13 +1,16 @@
 # Kitchen Timer - ESPHome
 
 Kitchen timer on ESP32-2432S028 CYD (Cheap Yellow Display) with Home Assistant integration.
-<img width="450" height="300" alt="image" src="https://github.com/user-attachments/assets/7a46e985-5463-4099-8b2a-365622345b0e" />
+<img width="4032" height="1792" alt="69618" src="https://github.com/user-attachments/assets/9f8d4b6a-5029-416a-b60a-2f6751b46ad0" />
+<img width="4032" height="1792" alt="69620" src="https://github.com/user-attachments/assets/e693fdc3-3961-434e-88cd-794233b64103" />
+<img width="417" height="594" alt="Screenshot 2026-08-05 at 12 47 05" src="https://github.com/user-attachments/assets/161ba29e-2a67-432a-acd6-d9630d7b07b8" />
 
-**Max duration:** 12 hours
 
 ## Hardware
 
 - ESP32-2432S028 CYD (Cheap Yellow Display)
+- TP4056 USB-C battery charging board
+- HC5274 step up board
 
 ## Features
 
@@ -18,7 +21,12 @@ Kitchen timer on ESP32-2432S028 CYD (Cheap Yellow Display) with Home Assistant i
 - Progress bar
 - Flashing alarm (+ Automation to alarm on Sonos)
 - Auto-silence after 10 minutes
+- Deep sleep after a min
 - Home Assistant integration
+
+## Wiring
+<img width="1037" height="275" alt="Screenshot 2026-08-05 at 12 45 18" src="https://github.com/user-attachments/assets/97868d54-a019-4283-9846-d98c3c33819a" />
+
 
 ## Setup
 
@@ -179,6 +187,4 @@ mode: restart
 ## Notes
 
 - Updates every 1s
-- Alarm flashes at 300ms
-- Display buffer: 25% RAM
-- Debug logging enabled
+- Alarm flashes every 1s
