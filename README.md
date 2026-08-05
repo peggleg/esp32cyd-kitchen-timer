@@ -11,6 +11,8 @@ Kitchen timer on ESP32-2432S028 CYD (Cheap Yellow Display) with Home Assistant i
 - ESP32-2432S028 CYD (Cheap Yellow Display)
 - TP4056 USB-C battery charging board
 - HC5274 step up board
+- 1x 18650 3500mAh battery
+- 1x 18650 battery holder (doubles as a stand) 
 
 ## Features
 
