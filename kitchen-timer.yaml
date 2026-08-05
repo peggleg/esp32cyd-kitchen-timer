@@ -739,8 +739,9 @@ lvgl:
             border_width: 0
             shadow_width: 0
             on_press:
-              - lambda: 'id(alarm_active) = false;'
+              - lambda: 'id(alarm_active) = false; id(sel_seconds) = 0;'
               - output.turn_off: buzzer_output
+              - script.execute: refresh_select
               - lvgl.page.show: page_select
         - label:
             id: lbl_done
