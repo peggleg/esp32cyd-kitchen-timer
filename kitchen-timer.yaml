@@ -216,11 +216,14 @@ lvgl:
             bg_color: 0x3AA85B
             border_width: 0
         - label:
-            x: 279
+            id: lbl_batt_sel
+            x: 274
             y: 8
-            text: "HA"
+            width: 36
+            text: "--%"
             text_font: f10
             text_color: 0x57554F
+            text_align: RIGHT
 
         - label:
             id: lbl_dial
@@ -613,11 +616,14 @@ lvgl:
             bg_color: 0x3AA85B
             border_width: 0
         - label:
-            x: 279
+            id: lbl_batt_run
+            x: 274
             y: 8
-            text: "HA"
+            width: 36
+            text: "--%"
             text_font: f10
             text_color: 0x57554F
+            text_align: RIGHT
 
         - label:
             id: lbl_count
@@ -810,7 +816,32 @@ script:
       - lvgl.label.update:
           id: lbl_pause
           text: !lambda 'return id(paused) ? std::string("RESUME") : std::string("PAUSE");'
-
+  - id: refresh_battery
+    then:
+      - lvgl.label.update:
+          id: lbl_batt_sel
+          text: !lambda |-
+            float p = id(battery_percent).state;
+            char b[12];
+            if (std::isnan(p)) snprintf(b, sizeof(b), "--%%");
+            else snprintf(b, sizeof(b), "%d%%", (int)(p + 0.5f));
+            return std::string(b);
+          text_color: !lambda |-
+            float p = id(battery_percent).state;
+            if (!std::isnan(p) && p < 20.0f) return lv_color_hex(0xEF6856);
+            return lv_color_hex(0x57554F);
+      - lvgl.label.update:
+          id: lbl_batt_run
+          text: !lambda |-
+            float p = id(battery_percent).state;
+            char b[12];
+            if (std::isnan(p)) snprintf(b, sizeof(b), "--%%");
+            else snprintf(b, sizeof(b), "%d%%", (int)(p + 0.5f));
+            return std::string(b);
+          text_color: !lambda |-
+            float p = id(battery_percent).state;
+            if (!std::isnan(p) && p < 20.0f) return lv_color_hex(0xEF6856);
+            return lv_color_hex(0x57554F);
 # ---------------------------------------------------------------- logic
 interval:
   # countdown
@@ -905,12 +936,13 @@ sensor:
     state_class: measurement
     accuracy_decimals: 2
     attenuation: 12db
-    update_interval: 10s
+    samples: 16
+    update_interval: 2s
     filters:
-      - multiply: 3.1277          # (100k + 47k) / 47k
+      - multiply: 3.318          # (100k + 47k) / 47k
       - sliding_window_moving_average:
-          window_size: 3
-          send_every: 3
+          window_size: 15
+          send_every: 15
     on_value:
       - sensor.template.publish:
           id: battery_percent
@@ -934,6 +966,7 @@ sensor:
               }
             }
             return 100.0f;
+      - script.execute: refresh_battery
 
   - platform: template
     id: battery_percent
